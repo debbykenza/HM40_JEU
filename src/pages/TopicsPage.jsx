@@ -1,50 +1,6 @@
 import React from 'react'
 import './TopicsPage.css'
-
-const topics = [
-  {
-    id: 'geographie',
-    title: 'Géographie',
-    subtitle: 'Pays, capitales et continents',
-    icon: '🌍',
-    color: 'green',
-  },
-  {
-    id: 'sciences',
-    title: 'Sciences',
-    subtitle: 'Physique, chimie, biologie',
-    icon: '⚛️',
-    color: 'blue',
-  },
-  {
-    id: 'histoire',
-    title: 'Histoire',
-    subtitle: 'Événements historiques',
-    icon: '📖',
-    color: 'amber',
-  },
-  {
-    id: 'culture-generale',
-    title: 'Culture Générale',
-    subtitle: 'Un peu de tout !',
-    icon: '💡',
-    color: 'coral',
-  },
-  {
-    id: 'arts',
-    title: 'Arts',
-    subtitle: 'Peinture, sculpture, artistes',
-    icon: '🎨',
-    color: 'red',
-  },
-  {
-    id: 'musique',
-    title: 'Musique',
-    subtitle: 'Instruments et compositeurs',
-    icon: '🎵',
-    color: 'purple',
-  },
-]
+import { topics } from '../data/quizData'
 
 function TopicsPage({ onBack, onSelectTopic }) {
   return (

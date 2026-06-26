@@ -40,26 +40,13 @@ function LoginPage({ onBack, onRegister, onLogin }) {
 
     setIsSubmitting(true);
     try {
-      // 🔥 Appel à Firebase
       const result = await authService.loginWithEmail(email.trim(), password);
       
       if (result.success && result.user) {
-        // Récupérer les données utilisateur depuis Firestore
-        const userData = await authService.getUserData(result.user.uid);
-        
-        if (userData.success) {
-          onLogin({ 
-            user: result.user, 
-            userData: userData.data 
-          });
-        } else {
-          // Si pas de données, créer un profil basique
-          await authService.createUserProfile(result.user);
-          onLogin({ 
-            user: result.user, 
-            userData: null 
-          });
-        }
+        onLogin({ 
+          user: result.user, 
+          userData: result.userData || null
+        });
       } else {
         setFormError(result.error || 'Erreur de connexion. Réessaie !');
       }

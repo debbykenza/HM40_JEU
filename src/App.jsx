@@ -1,6 +1,6 @@
-// src/App.jsx
 import { useState } from 'react';
 import { UserProvider, useUser } from './context/UserContext';
+import { authService } from './services/authService';
 import IntroPage from './pages/IntroPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -14,20 +14,24 @@ function AppContent() {
   const [view, setView] = useState('intro');
   const [selectedGame, setSelectedGame] = useState(null);
   const [selectedTopic, setSelectedTopic] = useState(null);
-  const { user, userData, loading } = useUser();
+  const [selectedLevel, setSelectedLevel] = useState(0);
+  const { user, userData, loading, refreshUserData } = useUser();
 
-  // Gestionnaires de navigation
-  const handleLogin = () => {
+  const handleLogin = async () => {
+    await refreshUserData();
     setView('home');
   };
 
   const handleLogout = () => {
     setView('intro');
+    setSelectedGame(null);
+    setSelectedTopic(null);
   };
 
   const handleRegister = async (email, password, displayName) => {
     const result = await authService.registerWithEmail(email, password, displayName);
     if (result.success && result.user) {
+      await refreshUserData();
       setView('home');
       return { success: true, error: null };
     } else {
@@ -35,8 +39,18 @@ function AppContent() {
     }
   };
 
+  const handleSelectGame = (game) => {
+    setSelectedGame(game);
+    setView('topics');
+  };
+
   const handleSelectTopic = (topic) => {
     setSelectedTopic(topic);
+    setView('game');
+  };
+
+  const handleGameComplete = (levelIndex = 0) => {
+    setSelectedLevel(levelIndex);
     setView('game-mode');
   };
 
@@ -46,6 +60,8 @@ function AppContent() {
 
   const handleFinishQuiz = () => {
     setView('home');
+    setSelectedGame(null);
+    setSelectedTopic(null);
   };
 
   if (loading) {
@@ -63,7 +79,6 @@ function AppContent() {
     );
   }
 
-  // Pages d'authentification
   if (view === 'login') {
     return (
       <LoginPage 
@@ -84,13 +99,11 @@ function AppContent() {
     );
   }
 
-  // Pages du jeu
-  if (view === 'game') {
+  if (view === 'home') {
     return (
-      <GamePage 
-        game={selectedGame} 
-        onBack={() => setView('home')} 
-        onOpenTopics={() => setView('topics')}
+      <HomePage 
+        onSelectGame={handleSelectGame}
+        onLogout={handleLogout}
       />
     );
   }
@@ -104,35 +117,36 @@ function AppContent() {
     );
   }
 
+  if (view === 'game') {
+    return (
+      <GamePage 
+        game={selectedGame}
+        topic={selectedTopic}
+        onBack={() => setView('topics')}
+        onNext={handleGameComplete}
+      />
+    );
+  }
+
   if (view === 'game-mode') {
     return (
       <GameModePage 
-        onBack={() => setView('topics')} 
+        onBack={() => setView('game')} 
         onStart={handleStartQuiz}
         topic={selectedTopic}
+        game={selectedGame}
       />
     );
   }
 
   if (view === 'quiz') {
     return (
-      <QuizPage 
-        onBack={() => setView('game-mode')} 
+      <QuizPage
+        onBack={() => setView('game-mode')}
         onHome={handleFinishQuiz}
         topic={selectedTopic}
-      />
-    );
-  }
-
-  if (view === 'home') {
-    return (
-      <HomePage 
-        onSelectGame={(game) => { 
-          setSelectedGame(game); 
-          setView('game');
-        }} 
-        onOpenTopics={() => setView('topics')}
-        onLogout={handleLogout}
+        game={selectedGame}
+        level={selectedLevel}
       />
     );
   }

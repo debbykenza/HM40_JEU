@@ -1,166 +1,177 @@
-// src/services/quizService.js
 import { doc, updateDoc, increment, getDoc, setDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 
-export const quizService = {
-  // Mettre à jour la progression de l'utilisateur
-  updateUserProgress: async (userId, topic, score, total) => {
-    try {
-      console.log('📊 updateUserProgress appelé:', { userId, topic, score, total });
-      
-      if (!userId) {
-        console.error('❌ userId manquant');
-        return { success: false, error: 'userId manquant' };
-      }
+const LOCAL_KEY = 'hm40_user_progress';
 
+// ── Helpers localStorage ───────────────────────────────────────────────────────
+
+const readLocal = () => JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}');
+
+const writeLocal = (data) => localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
+
+const saveStatsToLocal = (userId, topic, score, total) => {
+  try {
+    const data = readLocal();
+    if (!data[userId]) data[userId] = { stats: { topics: {} } };
+    if (!data[userId].stats) data[userId].stats = { topics: {} };
+    if (!data[userId].stats.topics) data[userId].stats.topics = {};
+    if (!data[userId].stats.topics[topic]) {
+      data[userId].stats.topics[topic] = { score: 0, completed: 0 };
+    }
+    data[userId].stats.topics[topic].score += score;
+    data[userId].stats.topics[topic].completed += 1;
+    data[userId].stats.topics[topic].lastPlayed = new Date().toISOString();
+    writeLocal(data);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const saveLevelToLocal = (userId, gameType, topicId, progress) => {
+  try {
+    const data = readLocal();
+    if (!data[userId]) data[userId] = {};
+    if (!data[userId].progress) data[userId].progress = {};
+    if (!data[userId].progress[gameType]) data[userId].progress[gameType] = {};
+    data[userId].progress[gameType][topicId] = progress;
+    writeLocal(data);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// ── Service ────────────────────────────────────────────────────────────────────
+
+export const quizService = {
+  // Local-first : on sauvegarde d'abord en local, puis on tente Firestore
+  updateUserProgress: async (userId, topic, score, total) => {
+    // 1. Sauvegarde locale immédiate (toujours réussit)
+    saveStatsToLocal(userId, topic, score, total);
+
+    // 2. Sync Firestore en background
+    try {
       const userRef = doc(db, 'users', userId);
       const userSnap = await getDoc(userRef);
-      
-      if (!userSnap.exists()) {
-        console.error('❌ Utilisateur non trouvé:', userId);
-        return { success: false, error: 'Utilisateur non trouvé' };
-      }
+      if (!userSnap.exists()) return { success: true };
 
-      const data = userSnap.data();
-      const currentStats = data.stats || {};
-      const topicStats = currentStats.topics || {};
-      
-      // Mettre à jour les stats du thème
-      const currentTopicStats = topicStats[topic] || { score: 0, completed: 0 };
-      
-      // Calcul des nouvelles valeurs
-      const newScore = (currentTopicStats.score || 0) + score;
-      const newCompleted = (currentTopicStats.completed || 0) + 1;
-      
-      console.log('📊 Mise à jour:', {
-        oldScore: currentTopicStats.score,
-        newScore,
-        oldCompleted: currentTopicStats.completed,
-        newCompleted
-      });
-      
-      // Mise à jour Firestore
+      const topicStats = userSnap.data()?.stats?.topics?.[topic] || { score: 0, completed: 0 };
+
       await updateDoc(userRef, {
         'stats.totalQuizzes': increment(1),
         'stats.correctAnswers': increment(score),
         [`stats.topics.${topic}`]: {
-          score: newScore,
-          completed: newCompleted,
+          score: (topicStats.score || 0) + score,
+          completed: (topicStats.completed || 0) + 1,
           lastPlayed: serverTimestamp()
         },
-        // Mettre à jour la date de dernière activité
         lastActive: serverTimestamp()
       });
-      
-      console.log('✅ Stats mises à jour avec succès pour le thème:', topic);
-      return { success: true, error: null };
-      
     } catch (error) {
-      console.error('❌ Erreur mise à jour progression:', error);
+      console.warn('Firestore stats sync différée (données sauvées localement)', error.message);
+    }
+
+    return { success: true };
+  },
+
+  // Sauvegarder la progression d'un niveau (local déjà fait dans UserContext)
+  saveLevelProgress: async (userId, gameType, topicId, progress) => {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        [`progress.${gameType}.${topicId}`]: progress,
+        lastActive: serverTimestamp()
+      });
+      return { success: true };
+    } catch (error) {
+      console.warn('Firestore level sync différée', error.message);
       return { success: false, error: error.message };
     }
   },
 
-  // Récupérer la progression de l'utilisateur
+  // Récupérer la progression de niveau depuis le local
+  getLocalLevelProgress: (userId, gameType, topicId) => {
+    try {
+      const data = readLocal();
+      return data[userId]?.progress?.[gameType]?.[topicId] || null;
+    } catch {
+      return null;
+    }
+  },
+
   getUserProgress: async (userId) => {
     try {
-      console.log('📊 getUserProgress appelé pour:', userId);
-      
-      if (!userId) {
-        console.error('❌ userId manquant');
-        return { success: false, data: null, error: 'userId manquant' };
-      }
+      if (!userId) return { success: false, data: null, error: 'userId manquant' };
 
       const userRef = doc(db, 'users', userId);
       const userSnap = await getDoc(userRef);
-      
+
       if (userSnap.exists()) {
-        const data = userSnap.data();
-        console.log('✅ Données utilisateur récupérées:', data);
-        return { 
-          success: true, 
-          data: data.stats || {},
-          userData: data,
-          error: null 
-        };
+        return { success: true, data: userSnap.data().stats || {}, userData: userSnap.data() };
       }
-      
-      console.warn('⚠️ Utilisateur non trouvé:', userId);
+
+      const local = readLocal();
+      if (local[userId]?.stats) {
+        return { success: true, data: local[userId].stats, userData: local[userId] };
+      }
+
       return { success: false, data: null, error: 'Utilisateur non trouvé' };
-      
     } catch (error) {
-      console.error('❌ Erreur récupération progression:', error);
+      const local = readLocal();
+      if (local[userId]?.stats) {
+        return { success: true, data: local[userId].stats, userData: local[userId] };
+      }
       return { success: false, data: null, error: error.message };
     }
   },
 
-  // Débloquer un jeu pour l'utilisateur
   unlockGame: async (userId, gameId) => {
     try {
-      console.log('🔓 Déblocage du jeu:', { userId, gameId });
-      
-      if (!userId || !gameId) {
-        console.error('❌ userId ou gameId manquant');
-        return { success: false, error: 'Paramètres manquants' };
-      }
-
+      if (!userId || !gameId) return { success: false, error: 'Paramètres manquants' };
       const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
-        unlockedGames: arrayUnion(gameId)
-      });
-      
-      console.log('✅ Jeu débloqué avec succès:', gameId);
-      return { success: true, error: null };
-      
+      await updateDoc(userRef, { unlockedGames: arrayUnion(gameId) });
+
+      const local = readLocal();
+      if (local[userId]) {
+        if (!local[userId].unlockedGames) local[userId].unlockedGames = [];
+        if (!local[userId].unlockedGames.includes(gameId)) local[userId].unlockedGames.push(gameId);
+        writeLocal(local);
+      }
+      return { success: true };
     } catch (error) {
-      console.error('❌ Erreur déblocage jeu:', error);
+      const local = readLocal();
+      if (local[userId]) {
+        if (!local[userId].unlockedGames) local[userId].unlockedGames = [];
+        if (!local[userId].unlockedGames.includes(gameId)) local[userId].unlockedGames.push(gameId);
+        writeLocal(local);
+        return { success: true };
+      }
       return { success: false, error: error.message };
     }
   },
 
-  // Récupérer les jeux débloqués
   getUnlockedGames: async (userId) => {
     try {
-      console.log('🎮 Récupération des jeux débloqués pour:', userId);
-      
-      if (!userId) {
-        console.error('❌ userId manquant');
-        return { success: false, data: [], error: 'userId manquant' };
-      }
-
+      if (!userId) return { success: false, data: [], error: 'userId manquant' };
       const userRef = doc(db, 'users', userId);
       const userSnap = await getDoc(userRef);
-      
       if (userSnap.exists()) {
-        const data = userSnap.data();
-        const unlockedGames = data.unlockedGames || [];
-        console.log('✅ Jeux débloqués:', unlockedGames);
-        return { 
-          success: true, 
-          data: unlockedGames,
-          error: null 
-        };
+        return { success: true, data: userSnap.data().unlockedGames || [] };
       }
-      
-      console.warn('⚠️ Utilisateur non trouvé:', userId);
-      return { success: false, data: [], error: 'Utilisateur non trouvé' };
-      
+      const local = readLocal();
+      return { success: true, data: local[userId]?.unlockedGames || [] };
     } catch (error) {
-      console.error('❌ Erreur récupération jeux débloqués:', error);
-      return { success: false, data: [], error: error.message };
+      const local = readLocal();
+      return { success: true, data: local[userId]?.unlockedGames || [] };
     }
   },
 
-  // Nouvelle méthode : Initialiser les stats d'un utilisateur (si elles n'existent pas)
   initializeUserStats: async (userId) => {
     try {
-      console.log('🔄 Initialisation des stats pour:', userId);
-      
       const userRef = doc(db, 'users', userId);
       const userSnap = await getDoc(userRef);
-      
       if (!userSnap.exists()) {
-        // Créer un document utilisateur avec des stats par défaut
         await setDoc(userRef, {
           uid: userId,
           createdAt: serverTimestamp(),
@@ -174,17 +185,67 @@ export const quizService = {
               histoire: { score: 0, completed: 0 }
             }
           },
+          progress: {},
           unlockedGames: []
         });
-        console.log('✅ Stats initialisées pour:', userId);
-        return { success: true, error: null };
       }
-      
-      console.log('ℹ️ Les stats existent déjà pour:', userId);
-      return { success: true, error: null };
-      
+      return { success: true };
     } catch (error) {
-      console.error('❌ Erreur initialisation stats:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Fusionne le local (stats + progression de niveaux) avec Firestore
+  mergeLocalWithFirestore: async (userId) => {
+    try {
+      const local = readLocal();
+      const localUser = local[userId];
+      if (!localUser) return { success: true };
+
+      const userRef = doc(db, 'users', userId);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) return { success: false, error: 'User not found' };
+
+      const firestoreData = userSnap.data();
+      const updates = { lastActive: serverTimestamp() };
+
+      // Merge stats
+      const localStats = localUser.stats;
+      if (localStats?.topics) {
+        const firestoreTopics = firestoreData.stats?.topics || {};
+        const mergedTopics = { ...firestoreTopics };
+        Object.keys(localStats.topics).forEach(topic => {
+          if (!mergedTopics[topic]) mergedTopics[topic] = { score: 0, completed: 0 };
+          mergedTopics[topic].score += localStats.topics[topic].score || 0;
+          mergedTopics[topic].completed += localStats.topics[topic].completed || 0;
+        });
+        updates['stats.topics'] = mergedTopics;
+      }
+
+      // Merge progression de niveaux
+      const localProgress = localUser.progress;
+      if (localProgress) {
+        const firestoreProgress = firestoreData.progress || {};
+        Object.entries(localProgress).forEach(([gameType, topics]) => {
+          Object.entries(topics).forEach(([topicId, prog]) => {
+            const existing = firestoreProgress[gameType]?.[topicId];
+            const mergedCompleted = existing
+              ? [...new Set([...(existing.completedLevels || []), ...(prog.completedLevels || [])])]
+              : (prog.completedLevels || []);
+            const mergedCurrent = Math.max(prog.currentLevel || 0, existing?.currentLevel || 0);
+            updates[`progress.${gameType}.${topicId}`] = {
+              completedLevels: mergedCompleted,
+              currentLevel: mergedCurrent
+            };
+          });
+        });
+      }
+
+      await updateDoc(userRef, updates);
+      localStorage.removeItem(LOCAL_KEY);
+      return { success: true };
+    } catch (error) {
+      console.error('Erreur synchronisation:', error);
       return { success: false, error: error.message };
     }
   }

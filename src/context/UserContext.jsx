@@ -17,138 +17,129 @@ export function UserProvider({ children }) {
   });
   const [loading, setLoading] = useState(true);
 
-  // Charger les données utilisateur
   const loadUserData = async (firebaseUser) => {
-    console.log('🔄 loadUserData appelé avec:', firebaseUser?.uid || 'null');
-    
     if (!firebaseUser) {
-      console.log('👤 Aucun utilisateur, réinitialisation des données');
       setUser(null);
       setUserData(null);
-      setStats({
-        points: 0,
-        badges: 0,
-        totalQuizzes: 0,
-        correctAnswers: 0,
-        topics: {}
-      });
+      setStats({ points: 0, badges: 0, totalQuizzes: 0, correctAnswers: 0, topics: {} });
       setLoading(false);
       return;
     }
 
     try {
-      console.log('📥 Récupération des données pour:', firebaseUser.uid);
       const result = await authService.getUserData(firebaseUser.uid);
-      
+
       if (result.success && result.data) {
-        console.log('✅ Données utilisateur récupérées avec succès');
         setUser(firebaseUser);
-        setUserData(result.data);
-        
+
+        // Merge Firestore progress avec local (le local peut être plus récent si offline)
+        const localData = JSON.parse(localStorage.getItem('hm40_user_progress') || '{}');
+        const localProgress = localData[firebaseUser.uid]?.progress;
+        const firestoreProgress = result.data.progress || {};
+        const mergedProgress = { ...firestoreProgress };
+
+        if (localProgress) {
+          Object.entries(localProgress).forEach(([gt, topics]) => {
+            if (!mergedProgress[gt]) mergedProgress[gt] = {};
+            Object.entries(topics).forEach(([tid, prog]) => {
+              const ex = mergedProgress[gt][tid];
+              mergedProgress[gt][tid] = {
+                completedLevels: ex
+                  ? [...new Set([...(ex.completedLevels || []), ...(prog.completedLevels || [])])]
+                  : (prog.completedLevels || []),
+                currentLevel: Math.max(prog.currentLevel || 0, ex?.currentLevel || 0)
+              };
+            });
+          });
+        }
+
+        setUserData({ ...result.data, progress: mergedProgress });
+
         const userStats = result.data.stats || {};
-        console.log('📊 Stats récupérées:', userStats);
-        
-        const newStats = {
+        setStats({
           points: userStats.totalQuizzes || 0,
           badges: Math.floor((userStats.correctAnswers || 0) / 10),
           totalQuizzes: userStats.totalQuizzes || 0,
           correctAnswers: userStats.correctAnswers || 0,
           topics: userStats.topics || {}
-        };
-        
-        setStats(newStats);
-        console.log('✅ Stats mises à jour:', newStats);
-      } else {
-        console.warn('⚠️ Aucune donnée utilisateur trouvée, création des stats par défaut');
-        setUser(firebaseUser);
-        setUserData(null);
-        
-        // Initialiser les stats dans Firestore
-        await quizService.initializeUserStats(firebaseUser.uid);
-        
-        setStats({
-          points: 0,
-          badges: 0,
-          totalQuizzes: 0,
-          correctAnswers: 0,
-          topics: {}
         });
+      } else {
+        setUser(firebaseUser);
+        setUserData({ displayName: firebaseUser.displayName || null, progress: {} });
+        await quizService.initializeUserStats(firebaseUser.uid);
+        setStats({ points: 0, badges: 0, totalQuizzes: 0, correctAnswers: 0, topics: {} });
       }
     } catch (error) {
-      console.error('❌ Erreur chargement données:', error);
-      setStats({
-        points: 0,
-        badges: 0,
-        totalQuizzes: 0,
-        correctAnswers: 0,
-        topics: {}
-      });
+      console.error('Erreur chargement données:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  // Mettre à jour les stats après un quiz
+  // Mettre à jour les stats après un quiz (local-first via quizService)
   const updateStats = async (topic, score, total) => {
-    console.log('📊 updateStats appelé:', { topic, score, total });
-    
-    try {
-      if (!user) {
-        console.error('❌ Aucun utilisateur connecté');
-        return;
-      }
-
-      console.log('🔄 Mise à jour des stats pour:', user.uid);
-      const result = await quizService.updateUserProgress(user.uid, topic, score, total);
-      
-      if (result.success) {
-        console.log('✅ Stats mises à jour avec succès, rechargement des données...');
-        // Recharger les données pour avoir les stats à jour
-        await loadUserData(user);
-      } else {
-        console.error('❌ Erreur lors de la mise à jour:', result.error);
-      }
-    } catch (error) {
-      console.error('❌ Erreur mise à jour stats:', error);
-    }
-  };
-
-  // Rafraîchir les données utilisateur
-  const refreshUserData = async () => {
-    if (user) {
-      console.log('🔄 Rafraîchissement des données pour:', user.uid);
+    if (!user) return;
+    const result = await quizService.updateUserProgress(user.uid, topic, score, total);
+    if (result.success) {
       await loadUserData(user);
     }
   };
 
-  // Écouter les changements d'authentification
+  // Compléter un niveau : local immédiat + sync Firestore en arrière-plan
+  const completeLevel = (gameType, topicId, levelIndex) => {
+    if (!user || levelIndex === undefined || levelIndex === null || !gameType || !topicId) return;
+
+    const LOCAL_KEY = 'hm40_user_progress';
+    const local = JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}');
+    if (!local[user.uid]) local[user.uid] = {};
+    if (!local[user.uid].progress) local[user.uid].progress = {};
+    if (!local[user.uid].progress[gameType]) local[user.uid].progress[gameType] = {};
+
+    const prev = local[user.uid].progress[gameType][topicId] || { completedLevels: [], currentLevel: 0 };
+    const completedLevels = [...new Set([...(prev.completedLevels || []), levelIndex])];
+    const nextLevel = levelIndex + 1;
+    const currentLevel = nextLevel < 5
+      ? Math.max(prev.currentLevel || 0, nextLevel)
+      : (prev.currentLevel || levelIndex);
+
+    const updated = { completedLevels, currentLevel };
+    local[user.uid].progress[gameType][topicId] = updated;
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
+
+    // Mise à jour immédiate du state React (optimiste)
+    setUserData(cur => ({
+      ...(cur || {}),
+      progress: {
+        ...((cur || {}).progress || {}),
+        [gameType]: {
+          ...(((cur || {}).progress || {})[gameType] || {}),
+          [topicId]: updated
+        }
+      }
+    }));
+
+    // Sync Firestore en arrière-plan (non-bloquant)
+    quizService.saveLevelProgress(user.uid, gameType, topicId, updated);
+  };
+
+  const refreshUserData = async () => {
+    const currentUser = authService.getCurrentUser();
+    const userToUse = currentUser || user;
+    if (userToUse) await loadUserData(userToUse);
+  };
+
   useEffect(() => {
-    console.log('🔄 Configuration de l\'écouteur d\'authentification');
     const unsubscribe = authService.onAuthStateChange(async (firebaseUser) => {
-      console.log('👤 Changement d\'état auth:', firebaseUser?.uid || 'déconnecté');
-      
       if (firebaseUser) {
         await loadUserData(firebaseUser);
       } else {
-        console.log('👤 Utilisateur déconnecté, réinitialisation');
         setUser(null);
         setUserData(null);
-        setStats({
-          points: 0,
-          badges: 0,
-          totalQuizzes: 0,
-          correctAnswers: 0,
-          topics: {}
-        });
+        setStats({ points: 0, badges: 0, totalQuizzes: 0, correctAnswers: 0, topics: {} });
         setLoading(false);
       }
     });
-
-    // Nettoyer l'écouteur
-    return () => {
-      console.log('🔄 Nettoyage de l\'écouteur d\'authentification');
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
 
   const value = {
@@ -157,6 +148,7 @@ export function UserProvider({ children }) {
     stats,
     loading,
     updateStats,
+    completeLevel,
     refreshUserData
   };
 

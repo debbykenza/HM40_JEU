@@ -1,23 +1,32 @@
-// src/services/authService.js
-import { 
+import {
   signInWithEmailAndPassword,
   signInWithPopup,
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
+  updateProfile,
+  onAuthStateChanged,
   signOut,
-  onAuthStateChanged
+  onIdTokenChanged
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import { quizService } from './quizService';
 
 export const authService = {
-  // Connexion avec Email/Mot de passe
   loginWithEmail: async (email, password) => {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      if (userCredential.user) {
+        // S'assure que le profil Firestore existe et a un displayName
+        await authService.createUserProfile(userCredential.user);
+        quizService.mergeLocalWithFirestore(userCredential.user.uid);
+      }
+      // Retourner l'utilisateur mis à jour depuis Firestore
+      const result = await authService.getUserData(userCredential.user.uid);
       return { 
         success: true, 
         user: userCredential.user,
+        userData: result.success ? result.data : null,
         error: null 
       };
     } catch (error) {
@@ -35,43 +44,50 @@ export const authService = {
       return { 
         success: false, 
         user: null,
+        userData: null,
         error: errorMessage 
       };
     }
   },
 
-  // Connexion avec Google
   loginWithGoogle: async () => {
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       
-      // Si c'est un nouvel utilisateur, créer son profil dans Firestore
       if (result.user) {
         await authService.createUserProfile(result.user);
+        quizService.mergeLocalWithFirestore(result.user.uid);
+        const userData = await authService.getUserData(result.user.uid);
+        return { 
+          success: true, 
+          user: result.user,
+          userData: userData.success ? userData.data : null,
+          error: null 
+        };
       }
       
-      return { 
-        success: true, 
-        user: result.user,
-        error: null 
-      };
+      return { success: false, user: null, userData: null, error: 'Aucun utilisateur retourné' };
     } catch (error) {
       console.error('Erreur Google:', error);
       return { 
         success: false, 
         user: null,
+        userData: null,
         error: 'Erreur de connexion avec Google. Réessaie !' 
       };
     }
   },
 
-  // Créer un compte
   registerWithEmail: async (email, password, displayName) => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      
-      // Créer le profil utilisateur dans Firestore
+
+      // Inscrire le nom dans le profil Firebase Auth pour que user.displayName soit disponible
+      if (displayName) {
+        await updateProfile(userCredential.user, { displayName: displayName.trim() });
+      }
+
       await authService.createUserProfile(userCredential.user, displayName);
       
       return { 
@@ -97,18 +113,25 @@ export const authService = {
     }
   },
 
-  // Créer le profil utilisateur dans Firestore
   createUserProfile: async (user, displayName = null) => {
     try {
       const userRef = doc(db, 'users', user.uid);
       const userSnap = await getDoc(userRef);
       
-      // Si l'utilisateur n'existe pas encore
+      // Priorité : displayName paramètre > displayName Firestore existant > displayName Firebase Auth > défaut
+      let nameToUse = displayName;
+      if (!nameToUse && userSnap.exists() && userSnap.data().displayName) {
+        nameToUse = userSnap.data().displayName;
+      }
+      if (!nameToUse) {
+        nameToUse = user.displayName || 'Joueur';
+      }
+
       if (!userSnap.exists()) {
         await setDoc(userRef, {
           uid: user.uid,
           email: user.email,
-          displayName: displayName || user.displayName || 'Joueur',
+          displayName: nameToUse,
           photoURL: user.photoURL || null,
           createdAt: serverTimestamp(),
           stats: {
@@ -121,8 +144,11 @@ export const authService = {
             }
           }
         });
+      } else if (!userSnap.data().displayName && displayName) {
+        // Mettre à jour le displayName si fourni et que le document l'a pas
+        await updateDoc(userRef, { displayName: displayName });
       }
-      
+
       return true;
     } catch (error) {
       console.error('Erreur création profil:', error);
@@ -130,7 +156,6 @@ export const authService = {
     }
   },
 
-  // Récupérer les données utilisateur
   getUserData: async (uid) => {
     try {
       const userRef = doc(db, 'users', uid);
@@ -159,7 +184,6 @@ export const authService = {
     }
   },
 
-  // Déconnexion
   logout: async () => {
     try {
       await signOut(auth);
@@ -171,7 +195,10 @@ export const authService = {
   },
 
   onAuthStateChange: (callback) => {
-    return onAuthStateChanged(auth, callback);
+    // Utilise onAuthStateChanged ET onIdTokenChanged pour une détection fiable
+    const unsub1 = onAuthStateChanged(auth, callback);
+    const unsub2 = onIdTokenChanged(auth, callback);
+    return () => { unsub1(); unsub2(); };
   },
 
   getCurrentUser: () => {
