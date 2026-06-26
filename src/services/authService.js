@@ -118,7 +118,7 @@ export const authService = {
       const userRef = doc(db, 'users', user.uid);
       const userSnap = await getDoc(userRef);
       
-      // Priorité : displayName paramètre > displayName Firestore existant > displayName Firebase Auth > défaut
+      // Priorité : displayName paramètre > displayName Firestore existant > défaut
       let nameToUse = displayName;
       if (!nameToUse && userSnap.exists() && userSnap.data().displayName) {
         nameToUse = userSnap.data().displayName;
@@ -142,11 +142,16 @@ export const authService = {
               sciences: { score: 0, completed: 0 },
               histoire: { score: 0, completed: 0 }
             }
-          }
+          },
+          progress: {},
+          unlockedGames: []
         });
-      } else if (!userSnap.data().displayName && displayName) {
-        // Mettre à jour le displayName si fourni et que le document l'a pas
-        await updateDoc(userRef, { displayName: displayName });
+      } else {
+        // Mettre à jour le displayName si manquant dans le document existant
+        const existingData = userSnap.data();
+        if (!existingData.displayName && displayName) {
+          await updateDoc(userRef, { displayName: displayName });
+        }
       }
 
       return true;

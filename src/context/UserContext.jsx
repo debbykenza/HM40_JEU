@@ -53,7 +53,13 @@ export function UserProvider({ children }) {
           });
         }
 
-        setUserData({ ...result.data, progress: mergedProgress });
+        // S'assurer que le displayName est toujours disponible
+        const safeData = {
+          ...result.data,
+          displayName: result.data.displayName || firebaseUser.displayName || 'Joueur',
+          progress: mergedProgress
+        };
+        setUserData(safeData);
 
         const userStats = result.data.stats || {};
         setStats({
@@ -65,7 +71,7 @@ export function UserProvider({ children }) {
         });
       } else {
         setUser(firebaseUser);
-        setUserData({ displayName: firebaseUser.displayName || null, progress: {} });
+        setUserData({ displayName: firebaseUser.displayName || 'Joueur', progress: {} });
         await quizService.initializeUserStats(firebaseUser.uid);
         setStats({ points: 0, badges: 0, totalQuizzes: 0, correctAnswers: 0, topics: {} });
       }
