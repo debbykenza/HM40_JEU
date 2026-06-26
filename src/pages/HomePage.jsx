@@ -1,8 +1,7 @@
 // src/pages/HomePage.jsx
-import React, { useState, useEffect } from 'react'
-import { authService } from '../services/authService'
-import { quizService } from '../services/quizService'
-import './HomePage.css'
+import React from 'react';
+import { useUser } from '../context/UserContext';
+import './HomePage.css';
 
 const games = [
   { id: 'quiz', name: 'Quiz', icon: '❓', accent: 'green', featured: true, locked: false },
@@ -15,90 +14,31 @@ const games = [
   { id: 'dessin', name: 'Dessin', icon: '🎨', accent: 'gray', locked: true },
   { id: 'enigme', name: 'Énigme', icon: '🕵️', accent: 'gray', locked: true },
   { id: 'chrono', name: 'Chrono', icon: '⏱️', accent: 'gray', locked: true },
-]
+];
 
-function HomePage({ stats: initialStats, onSelectGame, onLogout }) {
-  const [stats, setStats] = useState(initialStats || {
-    points: 0,
-    badges: 0,
-    unlocked: games.filter(g => !g.locked).length,
+function HomePage({ onSelectGame, onOpenTopics, onLogout }) {
+  const { user, userData, stats, loading } = useUser();
+  
+  const availableCount = games.filter((game) => !game.locked).length;
+  
+  // Récupérer le nom depuis le contexte
+  const userName = userData?.displayName || user?.displayName || 'Joueur';
+
+  // Statistiques à afficher
+  const displayStats = {
+    points: stats.points || 0,
+    badges: stats.badges || 0,
+    unlocked: availableCount,
     total: games.length
-  })
-  const [userName, setUserName] = useState('Joueur')
-  const [userData, setUserData] = useState(null)
-  const [loading, setLoading] = useState(true)
-
-  const availableCount = games.filter((game) => !game.locked).length
-
-  // 🔥 Charger les données utilisateur depuis Firestore
-  useEffect(() => {
-    const loadUserData = async () => {
-      try {
-        // Récupérer l'utilisateur actuel
-        const currentUser = authService.getCurrentUser()
-        if (currentUser) {
-          const result = await authService.getUserData(currentUser.uid)
-          if (result.success && result.data) {
-            const userStats = result.data.stats || {}
-            setUserData(result.data)
-            // 🔥 Mettre à jour le nom depuis Firestore
-            setUserName(result.data.displayName || currentUser.displayName || 'Joueur')
-            setStats({
-              points: userStats.totalQuizzes || 0,
-              badges: Math.floor((userStats.correctAnswers || 0) / 10),
-              unlocked: availableCount,
-              total: games.length
-            })
-          } else {
-            // Si pas de données dans Firestore, utiliser le nom du currentUser
-            setUserName(currentUser.displayName || 'Joueur')
-          }
-        }
-      } catch (error) {
-        console.error('Erreur chargement données:', error)
-        setUserName('Joueur')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadUserData()
-  }, [])
+  };
 
   function handleSelect(game) {
-    if (game.locked) {
-      return
-    }
-    onSelectGame?.(game)
-  }
-
-  // 🔥 Mettre à jour les stats quand l'utilisateur termine un quiz
-  const updateStats = async (quizResult) => {
-    try {
-      const currentUser = authService.getCurrentUser()
-      if (!currentUser) return
-
-      const result = await quizService.updateUserProgress(
-        currentUser.uid,
-        quizResult.topic,
-        quizResult.score,
-        quizResult.total
-      )
-
-      if (result.success) {
-        setStats(prev => ({
-          ...prev,
-          points: prev.points + quizResult.score,
-          badges: Math.floor((prev.points + quizResult.score) / 10)
-        }))
-      }
-    } catch (error) {
-      console.error('Erreur mise à jour stats:', error)
-    }
+    if (game.locked) return;
+    onSelectGame?.(game);
   }
 
   if (loading) {
-    return <div className="loading-spinner">Chargement...</div>
+    return <div className="loading-spinner">Chargement...</div>;
   }
 
   return (
@@ -163,22 +103,22 @@ function HomePage({ stats: initialStats, onSelectGame, onLogout }) {
           </div>
           <div className="stats-numbers">
             <div className="stats-pill">
-              <span className="stats-value">{stats.points}</span>
+              <span className="stats-value">{displayStats.points}</span>
               <span className="stats-label">points</span>
             </div>
             <div className="stats-pill">
-              <span className="stats-value">{stats.badges}</span>
+              <span className="stats-value">{displayStats.badges}</span>
               <span className="stats-label">badges</span>
             </div>
             <div className="stats-pill">
-              <span className="stats-value">{stats.unlocked}/{stats.total}</span>
+              <span className="stats-value">{displayStats.unlocked}/{displayStats.total}</span>
               <span className="stats-label">jeux</span>
             </div>
           </div>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default HomePage
+export default HomePage;

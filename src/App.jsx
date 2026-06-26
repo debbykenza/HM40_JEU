@@ -1,6 +1,6 @@
 // src/App.jsx
-import { useState, useEffect } from 'react';
-import { authService } from './services/authService';
+import { useState } from 'react';
+import { UserProvider, useUser } from './context/UserContext';
 import IntroPage from './pages/IntroPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -10,53 +10,24 @@ import TopicsPage from './pages/TopicsPage';
 import GameModePage from './pages/GameModePage';
 import QuizPage from './pages/QuizPage';
 
-function App() {
+function AppContent() {
   const [view, setView] = useState('intro');
   const [selectedGame, setSelectedGame] = useState(null);
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [selectedTopic, setSelectedTopic] = useState(null);
+  const { user, userData, loading } = useUser();
 
-  // 🎯 Vérifier si l'utilisateur est déjà connecté au chargement
-  useEffect(() => {
-    const unsubscribe = authService.onAuthStateChange(async (firebaseUser) => {
-      if (firebaseUser) {
-        // Récupérer les données utilisateur depuis Firestore
-        const result = await authService.getUserData(firebaseUser.uid);
-        setUser({
-          ...firebaseUser,
-          userData: result.success ? result.data : null
-        });
-        
-        // Si l'utilisateur est connecté, aller directement à l'accueil
-        setView('home');
-      } else {
-        setUser(null);
-        // Si pas connecté, rester sur la page d'intro
-        if (view === 'home') {
-          setView('intro');
-        }
-      }
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // 🔐 Gestionnaire de connexion
-  const handleLogin = (userData) => {
-    setUser(userData);
+  // Gestionnaires de navigation
+  const handleLogin = () => {
     setView('home');
   };
 
-  // 📝 Gestionnaire d'inscription
+  const handleLogout = () => {
+    setView('intro');
+  };
+
   const handleRegister = async (email, password, displayName) => {
     const result = await authService.registerWithEmail(email, password, displayName);
     if (result.success && result.user) {
-      const userData = await authService.getUserData(result.user.uid);
-      setUser({
-        ...result.user,
-        userData: userData.success ? userData.data : null
-      });
       setView('home');
       return { success: true, error: null };
     } else {
@@ -64,14 +35,19 @@ function App() {
     }
   };
 
-  // 🚪 Gestionnaire de déconnexion
-  const handleLogout = async () => {
-    await authService.logout();
-    setUser(null);
-    setView('intro');
+  const handleSelectTopic = (topic) => {
+    setSelectedTopic(topic);
+    setView('game-mode');
   };
 
-  // ⏳ Afficher un écran de chargement
+  const handleStartQuiz = () => {
+    setView('quiz');
+  };
+
+  const handleFinishQuiz = () => {
+    setView('home');
+  };
+
   if (loading) {
     return (
       <div style={{ 
@@ -87,7 +63,7 @@ function App() {
     );
   }
 
-  // 📄 Pages d'authentification
+  // Pages d'authentification
   if (view === 'login') {
     return (
       <LoginPage 
@@ -108,14 +84,13 @@ function App() {
     );
   }
 
-  // 🎮 Pages du jeu (protégées - nécessitent d'être connecté)
+  // Pages du jeu
   if (view === 'game') {
     return (
       <GamePage 
         game={selectedGame} 
         onBack={() => setView('home')} 
         onOpenTopics={() => setView('topics')}
-        user={user}
       />
     );
   }
@@ -124,8 +99,7 @@ function App() {
     return (
       <TopicsPage 
         onBack={() => setView('home')} 
-        onSelectTopic={() => setView('game-mode')}
-        user={user}
+        onSelectTopic={handleSelectTopic}
       />
     );
   }
@@ -134,8 +108,8 @@ function App() {
     return (
       <GameModePage 
         onBack={() => setView('topics')} 
-        onStart={() => setView('quiz')}
-        user={user}
+        onStart={handleStartQuiz}
+        topic={selectedTopic}
       />
     );
   }
@@ -144,18 +118,15 @@ function App() {
     return (
       <QuizPage 
         onBack={() => setView('game-mode')} 
-        onHome={() => setView('home')}
-        user={user}
+        onHome={handleFinishQuiz}
+        topic={selectedTopic}
       />
     );
   }
 
-  // 🏠 Page d'accueil
   if (view === 'home') {
     return (
       <HomePage 
-        name={user?.userData?.displayName || user?.displayName || 'Joueur'}
-        user={user}
         onSelectGame={(game) => { 
           setSelectedGame(game); 
           setView('game');
@@ -166,8 +137,15 @@ function App() {
     );
   }
 
-  // 🎬 Page d'intro
   return <IntroPage onStart={() => setView('login')} />;
+}
+
+function App() {
+  return (
+    <UserProvider>
+      <AppContent />
+    </UserProvider>
+  );
 }
 
 export default App;

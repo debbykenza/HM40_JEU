@@ -1,10 +1,12 @@
-import React, { useState } from 'react'
+// src/pages/GameModePage.jsx
+import React, { useState } from 'react';
 
 function GameModePage({ onBack, onStart }) {
-  const [gameType, setGameType] = useState('learning')
-  const [playerMode, setPlayerMode] = useState('solo')
+  const [gameType, setGameType] = useState('learning');
+  const [playerMode, setPlayerMode] = useState('solo');
 
-  const isReady = Boolean(gameType && playerMode)
+  // Le bouton Start est prêt uniquement si les deux modes sont sélectionnés
+  const isReady = Boolean(gameType && playerMode);
 
   return (
     <div className="game-mode-page">
@@ -54,10 +56,12 @@ function GameModePage({ onBack, onStart }) {
               <p>Le quiz sera joué individuellement.</p>
             </button>
 
+            {/* 🔥 Mode Multi toujours désactivé */}
             <button
               type="button"
-              className={`mode-card mode-card--disabled ${playerMode === 'multi' ? 'mode-card--active' : ''}`}
-              onClick={() => setPlayerMode('multi')}
+              className="mode-card mode-card--disabled"
+              disabled={true}
+              onClick={() => {}}
             >
               <div className="mode-icon">👥</div>
               <h3>Multi</h3>
@@ -66,12 +70,17 @@ function GameModePage({ onBack, onStart }) {
           </div>
         </div>
 
-        <button type="button" className={`start-quiz-btn ${isReady ? 'start-quiz-btn--ready' : ''}`} onClick={onStart}>
+        <button 
+          type="button" 
+          className={`start-quiz-btn ${isReady ? 'start-quiz-btn--ready' : ''}`} 
+          onClick={onStart}
+          disabled={!isReady}
+        >
           Commencer le quiz
         </button>
       </div>
     </div>
-  )
+  );
 }
 
-export default GameModePage
+export default GameModePage;

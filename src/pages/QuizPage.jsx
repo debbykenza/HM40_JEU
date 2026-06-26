@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from 'react'
+// src/pages/QuizPage.jsx
+import React, { useMemo, useState } from 'react';
+import { useUser } from '../context/UserContext';
 
 const createIllustration = (icon, accent, label) => {
   const svg = `
@@ -9,10 +11,10 @@ const createIllustration = (icon, accent, label) => {
       <text x="90" y="64" text-anchor="middle" font-size="34">${icon}</text>
       <text x="90" y="96" text-anchor="middle" font-size="13" fill="#334155">${label}</text>
     </svg>
-  `
+  `;
 
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
-}
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
 
 const questions = [
   {
@@ -65,59 +67,61 @@ const questions = [
       { id: 'D', label: 'Flûte', image: createIllustration('🪈', '#f8fafc', 'Flûte'), isCorrect: false },
     ],
   },
-]
+];
 
-function QuizPage({ onBack, onHome }) {
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [selectedAnswerId, setSelectedAnswerId] = useState(null)
-  const [showFeedback, setShowFeedback] = useState(false)
-  const [score, setScore] = useState(0)
-  const [finished, setFinished] = useState(false)
+function QuizPage({ onBack, onHome, topic }) {
+  const { updateStats } = useUser();
+  
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [selectedAnswerId, setSelectedAnswerId] = useState(null);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [score, setScore] = useState(0);
+  const [finished, setFinished] = useState(false);
 
-  const totalQuestions = questions.length
-  const currentQuestion = questions[currentIndex]
-  const correctAnswerId = useMemo(() => currentQuestion.answers.find((answer) => answer.isCorrect)?.id, [currentQuestion])
-  const successPercent = Math.round((score / totalQuestions) * 100)
-  const resultSubtitle = successPercent >= 80 ? 'Excellent ! Tu maîtrises déjà le sujet.' : successPercent >= 60 ? 'Très bon résultat, continue comme ça !' : successPercent >= 40 ? 'Bien joué, encore un peu de pratique.' : 'Tu peux t\'améliorer, réessaye !'
-  const stars = successPercent >= 70 ? '⭐⭐⭐' : successPercent >= 40 ? '⭐⭐☆' : '⭐☆☆'
+  const totalQuestions = questions.length;
+  const currentQuestion = questions[currentIndex];
+  const correctAnswerId = useMemo(() => currentQuestion.answers.find((answer) => answer.isCorrect)?.id, [currentQuestion]);
+  const successPercent = Math.round((score / totalQuestions) * 100);
+  const resultSubtitle = successPercent >= 80 ? 'Excellent ! Tu maîtrises déjà le sujet.' : successPercent >= 60 ? 'Très bon résultat, continue comme ça !' : successPercent >= 40 ? 'Bien joué, encore un peu de pratique.' : 'Tu peux t\'améliorer, réessaye !';
+  const stars = successPercent >= 70 ? '⭐⭐⭐' : successPercent >= 40 ? '⭐⭐☆' : '⭐☆☆';
 
   const handleSelect = (answerId) => {
-    if (showFeedback) {
-      return
-    }
+    if (showFeedback) return;
 
-    setSelectedAnswerId(answerId)
-    setShowFeedback(true)
+    setSelectedAnswerId(answerId);
+    setShowFeedback(true);
 
     if (answerId === correctAnswerId) {
-      setScore((prevScore) => prevScore + 1)
+      setScore((prevScore) => prevScore + 1);
     }
-  }
+  };
 
   const handleNext = () => {
-    if (!showFeedback) {
-      return
-    }
+    if (!showFeedback) return;
 
     if (currentIndex === questions.length - 1) {
-      setFinished(true)
-      return
+      if (topic) {
+        const topicId = typeof topic === 'string' ? topic : topic.id;
+        updateStats(topicId, score, totalQuestions);
+      }
+      setFinished(true);
+      return;
     }
 
-    setCurrentIndex((prevIndex) => prevIndex + 1)
-    setSelectedAnswerId(null)
-    setShowFeedback(false)
-  }
+    setCurrentIndex((prevIndex) => prevIndex + 1);
+    setSelectedAnswerId(null);
+    setShowFeedback(false);
+  };
 
   const resetQuiz = () => {
-    setCurrentIndex(0)
-    setSelectedAnswerId(null)
-    setShowFeedback(false)
-    setScore(0)
-    setFinished(false)
-  }
+    setCurrentIndex(0);
+    setSelectedAnswerId(null);
+    setShowFeedback(false);
+    setScore(0);
+    setFinished(false);
+  };
 
-  const progressLabel = finished ? 'Quiz terminé' : `Question ${currentIndex + 1} sur ${questions.length}`
+  const progressLabel = finished ? 'Quiz terminé' : `Question ${currentIndex + 1} sur ${questions.length}`;
 
   return (
     <div className="quiz-page">
@@ -137,8 +141,8 @@ function QuizPage({ onBack, onHome }) {
 
             <div className="quiz-progress">
               {questions.map((_, index) => {
-                const state = index < currentIndex ? 'filled' : index === currentIndex ? 'active' : 'pending'
-                return <div key={index} className={`quiz-progress-segment quiz-progress-segment--${state}`} />
+                const state = index < currentIndex ? 'filled' : index === currentIndex ? 'active' : 'pending';
+                return <div key={index} className={`quiz-progress-segment quiz-progress-segment--${state}`} />;
               })}
             </div>
             <p className="quiz-progress-label">{progressLabel}</p>
@@ -152,18 +156,18 @@ function QuizPage({ onBack, onHome }) {
 
               <div className="answers-grid">
                 {currentQuestion.answers.map((answer) => {
-                  const isSelected = selectedAnswerId === answer.id
-                  const isCorrect = answer.id === correctAnswerId
-                  let cardClass = 'answer-card answer-card--neutral'
+                  const isSelected = selectedAnswerId === answer.id;
+                  const isCorrect = answer.id === correctAnswerId;
+                  let cardClass = 'answer-card answer-card--neutral';
 
                   if (showFeedback) {
                     if (isCorrect) {
-                      cardClass = 'answer-card answer-card--correct'
+                      cardClass = 'answer-card answer-card--correct';
                     } else if (isSelected) {
-                      cardClass = 'answer-card answer-card--wrong'
+                      cardClass = 'answer-card answer-card--wrong';
                     }
                   } else if (isSelected) {
-                    cardClass = 'answer-card answer-card--selected'
+                    cardClass = 'answer-card answer-card--selected';
                   }
 
                   return (
@@ -181,20 +185,28 @@ function QuizPage({ onBack, onHome }) {
                       <img className="answer-image" src={answer.image} alt={answer.label} />
                       <p>{answer.label}</p>
                     </button>
-                  )
+                  );
                 })}
               </div>
             </section>
 
-            <section className="info-card">
-              <div className="info-card-icon">💡</div>
-              <div>
-                <h2>Le savais-tu ?</h2>
-                <p>{currentQuestion.tip}</p>
-              </div>
-            </section>
+            {/* 🔥 Le tip s'affiche uniquement après avoir répondu (showFeedback) */}
+            {showFeedback && (
+              <section className="info-card">
+                <div className="info-card-icon">💡</div>
+                <div>
+                  <h2>Le savais-tu ?</h2>
+                  <p>{currentQuestion.tip}</p>
+                </div>
+              </section>
+            )}
 
-            <button type="button" className={`quiz-next-btn ${showFeedback ? 'quiz-next-btn--ready' : ''}`} onClick={handleNext} disabled={!showFeedback}>
+            <button 
+              type="button" 
+              className={`quiz-next-btn ${showFeedback ? 'quiz-next-btn--ready' : ''}`} 
+              onClick={handleNext} 
+              disabled={!showFeedback}
+            >
               {currentIndex === questions.length - 1 ? 'Terminer le quiz' : 'Question suivante'}
             </button>
           </>
@@ -226,7 +238,7 @@ function QuizPage({ onBack, onHome }) {
         )}
       </div>
     </div>
-  )
+  );
 }
 
-export default QuizPage
+export default QuizPage;
